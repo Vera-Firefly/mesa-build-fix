@@ -1068,7 +1068,7 @@ fd_screen_create(int fd,
                  const struct pipe_screen_config *config,
                  struct renderonly *ro)
 {
-   struct fd_device *dev = fd_device_new_dup(fd);
+   struct fd_device *dev = fd_device_new(fd);
    if (!dev)
       return NULL;
 
