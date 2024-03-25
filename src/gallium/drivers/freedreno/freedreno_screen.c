@@ -1068,7 +1068,7 @@ fd_screen_create(int fd,
                  const struct pipe_screen_config *config,
                  struct renderonly *ro)
 {
-   struct fd_device *dev = fd_device_new(fd);
+   struct fd_device *dev = fd_device_new_dup(fd);
    if (!dev)
       return NULL;
 
@@ -1173,11 +1173,6 @@ fd_screen_create(int fd,
       screen->has_robustness = true;
 
    screen->has_syncobj = fd_has_syncobj(screen->dev);
-
-   screen->driconf.conservative_lrz =
-         !driQueryOptionb(config->options, "disable_conservative_lrz");
-   screen->driconf.enable_throttling =
-         !driQueryOptionb(config->options, "disable_throttling");
 
    struct sysinfo si;
    sysinfo(&si);
