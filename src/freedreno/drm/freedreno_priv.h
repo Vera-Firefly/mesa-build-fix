@@ -108,6 +108,8 @@ struct fd_device_funcs {
     */
    struct fd_bo *(*bo_from_handle)(struct fd_device *dev, uint32_t size,
                                    uint32_t handle);
+   struct fd_bo *(*bo_from_dmabuf)(struct fd_device *dev, int fd);
+   void (*bo_close_handle)(struct fd_device *dev, uint32_t handle);
    uint32_t (*handle_from_dmabuf)(struct fd_device *dev, int fd);
    struct fd_bo *(*bo_from_dmabuf)(struct fd_device *dev, int fd);
    void (*bo_close_handle)(struct fd_bo *bo);
@@ -207,6 +209,7 @@ struct fd_device {
    int fd;
    enum fd_version version;
    int32_t refcnt;
+   uint32_t features;
 
    /* tables to keep track of bo's, to avoid "evil-twin" fd_bo objects:
     *
@@ -308,6 +311,7 @@ struct fd_pipe_funcs {
    struct fd_ringbuffer *(*ringbuffer_new_object)(struct fd_pipe *pipe,
                                                   uint32_t size);
    struct fd_submit *(*submit_new)(struct fd_pipe *pipe);
+   int (*reset_status)(struct fd_pipe *pipe, enum fd_reset_status *status);
 
    /**
     * Flush any deferred submits (if deferred submits are supported by
@@ -475,6 +479,7 @@ void fd_bo_fini_fences(struct fd_bo *bo);
 void fd_bo_fini_common(struct fd_bo *bo);
 
 struct fd_bo *fd_bo_new_ring(struct fd_device *dev, uint32_t size);
+void fd_bo_close_handle_drm(struct fd_device *dev, uint32_t handle);
 
 uint32_t fd_handle_from_dmabuf_drm(struct fd_device *dev, int fd);
 struct fd_bo *fd_bo_from_dmabuf_drm(struct fd_device *dev, int fd);
