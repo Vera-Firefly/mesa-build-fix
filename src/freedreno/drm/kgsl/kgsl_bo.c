@@ -39,7 +39,7 @@ kgsl_bo_cpu_prep(struct fd_bo *bo, struct fd_pipe *pipe, uint32_t op)
 }
 
 void
-kgsl_bo_close_handle(struct fd_device *dev, uint32_t handle)
+kgsl_bo_close_handle(struct fd_bo *bo, uint32_t handle)
 {
     struct kgsl_gpumem_free_id req = {
         .id = handle
