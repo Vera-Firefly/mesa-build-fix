@@ -459,7 +459,7 @@ fd_bo_fini_fences(struct fd_bo *bo)
 }
 
 void
-fd_bo_close_handle_drm(struct fd_bo *bo)
+fd_bo_close_handle_drm(struct fd_bo *bo, uint32_t handle)
 {
    struct drm_gem_close req = {
       .handle = bo->handle,
