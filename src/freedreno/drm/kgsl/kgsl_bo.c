@@ -45,7 +45,7 @@ kgsl_bo_close_handle(struct fd_bo *bo, uint32_t handle)
         .id = handle
     };
 
-    kgsl_pipe_safe_ioctl(dev->fd, IOCTL_KGSL_GPUMEM_FREE_ID, &req);
+    kgsl_pipe_safe_ioctl(bo->dev->fd, IOCTL_KGSL_GPUMEM_FREE_ID, &req);
 }
 
 static void
