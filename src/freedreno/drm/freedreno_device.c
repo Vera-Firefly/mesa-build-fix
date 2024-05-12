@@ -56,7 +56,7 @@ fd_device_new(int fd)
    version = drmGetVersion(fd);
    if (!version)
       ERROR_MSG("cannot get version: %s", strerror(errno));
-#emdif
+#endif
 
    if (version && !strcmp(version->name, "msm")) {
       DEBUG_MSG("msm DRM device");
