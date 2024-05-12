@@ -31,6 +31,7 @@
 #include "util/os_file.h"
 
 #include "freedreno_drmif.h"
+#include "freedreno_drm_perfetto.h"
 #include "freedreno_priv.h"
 
 struct fd_device *msm_device_new(int fd, drmVersionPtr version);
@@ -75,7 +76,7 @@ fd_device_new(int fd)
        */
       use_heap = true;
 #endif
-#ifdef HAVE_FREEDRENO_KGSL
+#if HAVE_FREEDRENO_KGSL
    } else {
       dev = kgsl_device_new(fd);
       support_use_heap = false;
@@ -94,6 +95,8 @@ out:
 
    if (!dev)
       return NULL;
+
+   fd_drm_perfetto_init();
 
    p_atomic_set(&dev->refcnt, 1);
    dev->fd = fd;
