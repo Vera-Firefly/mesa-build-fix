@@ -33,8 +33,8 @@ foreach lua : ['lua54', 'lua53', 'lua52', 'lua']
     endif
 endforeach
 
-dep_libarchive = dependency('libarchive', required: false)
-dep_libxml2 = dependency('libxml-2.0', required: false)
+dep_libarchive = dependency('libarchive', allow_fallback: false, required: false)
+dep_libxml2 = dependency('libxml-2.0', allow_fallback: false, required: false)
 prog_gzip = find_program('gzip', required: false)
 
 install_fd_decode_tools = dep_libxml2.found() and prog_gzip.found() and \

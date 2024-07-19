@@ -20,6 +20,7 @@
 
 files_libfreedreno = files(
   'driinfo_freedreno.h',
+  'freedreno_public.h',
   'freedreno_autotune.c',
   'freedreno_autotune.h',
   'freedreno_batch.c',
