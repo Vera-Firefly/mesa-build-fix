@@ -27,6 +27,8 @@
          util_perfetto_trace_end(category);                                  \
    } while (0)
 
+#else
+
 #define _MESA_TRACE_BEGIN(category, name)
 #define _MESA_TRACE_END(category)
 
