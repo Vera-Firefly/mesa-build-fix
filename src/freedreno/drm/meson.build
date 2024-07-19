@@ -37,10 +37,10 @@ libfreedreno_drm_includes = [
   inc_freedreno,
   inc_include,
   inc_src,
-]
-libfreedreno_drm_deps = [
-  dep_libdrm,
-  dep_valgrind,
+  inc_mapi,
+  inc_mesa,
+  inc_gallium,
+  inc_gallium_aux,
 ]
 
 libfreedreno_drm_msm_files = files(
@@ -54,29 +54,18 @@ libfreedreno_drm_msm_files = files(
 libfreedreno_drm_files += libfreedreno_drm_msm_files
 
 libfreedreno_drm_virtio_files = files(
+  'virtio/msm_proto.h',
   'virtio/virtio_bo.c',
   'virtio/virtio_device.c',
   'virtio/virtio_pipe.c',
   'virtio/virtio_priv.h',
   'virtio/virtio_ringbuffer.c',
+  'virtio/virtio_ringbuffer.h',
 )
 if freedreno_kmds.contains('virtio')
   libfreedreno_drm_files += libfreedreno_drm_virtio_files
   libfreedreno_drm_flags += '-DHAVE_FREEDRENO_VIRTIO'
-  libfreedreno_drm_includes += [
-    inc_virtio_gpu,
-    inc_virtio_vdrm,
-  ]
-endif
-
-libfreedreno_kgsl_files = files(
-  'kgsl/kgsl_device.c',
-  'kgsl/kgsl_bo.c',
-  'kgsl/kgsl_pipe.c',
-  'kgsl/kgsl_ringbuffer_sp.c',
-)
-if get_option('freedreno-kmds').contains('kgsl')
-  libfreedreno_drm_files += libfreedreno_kgsl_files
+  libfreedreno_drm_includes += inc_virtio_gpu
 endif
 
 libfreedreno_drm = static_library(
@@ -88,9 +77,10 @@ libfreedreno_drm = static_library(
   include_directories : libfreedreno_drm_includes,
   c_args : [no_override_init_args, libfreedreno_drm_flags],
   gnu_symbol_visibility : 'hidden',
-  dependencies : libfreedreno_drm_deps,
-  # TODO
-  link_with : [libvdrm],
+  dependencies : [
+    dep_libdrm,
+    dep_valgrind,
+  ],
   build_by_default : false,
 )
 

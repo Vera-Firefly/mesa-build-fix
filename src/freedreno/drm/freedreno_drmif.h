@@ -67,13 +67,6 @@ enum fd_param_id {
    FD_VA_SIZE,       /* GPU virtual address size */
 };
 
-enum fd_reset_status {
-   FD_RESET_NO_ERROR,
-   FD_RESET_GUILTY,
-   FD_RESET_INNOCENT,
-   FD_RESET_UNKNOWN,
-};
-
 /**
  * Helper for fence/seqno comparisions which deals properly with rollover.
  * Returns true if fence 'a' is before fence 'b'
@@ -152,6 +145,7 @@ int fd_fence_wait(struct fd_fence *f);
 #define FD_BO_SCANOUT             BITSET_BIT(5)
 
 /* internal bo flags: */
+#define _FD_BO_VIRTIO_SHM         BITSET_BIT(6)
 #define _FD_BO_NOSYNC             BITSET_BIT(7) /* Avoid userspace fencing on control buffers */
 
 /*
@@ -190,12 +184,6 @@ enum fd_version {
 };
 enum fd_version fd_device_version(struct fd_device *dev);
 
-enum fd_features {
-    FD_FEATURE_DIRECT_RESET = 1,
-    FD_FEATURE_IMPORT_DMABUF = 2,
-};
-
-uint32_t fd_get_features(struct fd_device *dev);
 bool fd_has_syncobj(struct fd_device *dev);
 
 /* pipe functions:
@@ -217,7 +205,6 @@ int fd_pipe_wait(struct fd_pipe *pipe, const struct fd_fence *fence);
 /* timeout in nanosec */
 int fd_pipe_wait_timeout(struct fd_pipe *pipe, const struct fd_fence *fence,
                          uint64_t timeout);
-int fd_pipe_get_reset_status(struct fd_pipe *pipe, enum fd_reset_status *status);
 
 /* buffer-object functions:
  */
@@ -299,7 +286,6 @@ struct fd_bo *fd_bo_from_handle(struct fd_device *dev, uint32_t handle,
                                 uint32_t size);
 struct fd_bo *fd_bo_from_name(struct fd_device *dev, uint32_t name);
 struct fd_bo *fd_bo_from_dmabuf(struct fd_device *dev, int fd);
-struct fd_bo *fd_bo_from_dmabuf_drm(struct fd_device *dev, int fd);
 void fd_bo_mark_for_dump(struct fd_bo *bo);
 
 static inline uint64_t
@@ -316,7 +302,6 @@ void fd_bo_del_array(struct fd_bo **bos, int count);
 void fd_bo_del_list_nocache(struct list_head *list);
 int fd_bo_get_name(struct fd_bo *bo, uint32_t *name);
 uint32_t fd_bo_handle(struct fd_bo *bo);
-int fd_bo_dmabuf_drm(struct fd_bo *bo);
 int fd_bo_dmabuf(struct fd_bo *bo);
 uint32_t fd_bo_size(struct fd_bo *bo);
 void *fd_bo_map(struct fd_bo *bo);
@@ -324,8 +309,6 @@ void fd_bo_upload(struct fd_bo *bo, void *src, unsigned off, unsigned len);
 bool fd_bo_prefer_upload(struct fd_bo *bo, unsigned len);
 int fd_bo_cpu_prep(struct fd_bo *bo, struct fd_pipe *pipe, uint32_t op);
 bool fd_bo_is_cached(struct fd_bo *bo);
-void fd_bo_set_metadata(struct fd_bo *bo, void *metadata, uint32_t metadata_size);
-int fd_bo_get_metadata(struct fd_bo *bo, void *metadata, uint32_t metadata_size);
 
 #ifdef __cplusplus
 } /* end of extern "C" */

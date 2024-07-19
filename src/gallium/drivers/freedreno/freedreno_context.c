@@ -323,13 +323,6 @@ fd_context_switch_to(struct fd_context *ctx, struct fd_batch *batch)
    }
 }
 
-void
-fd_context_add_private_bo(struct fd_context *ctx, struct fd_bo *bo)
-{
-   assert(ctx->num_private_bos < ARRAY_SIZE(ctx->private_bos));
-   ctx->private_bos[ctx->num_private_bos++] = bo;
-}
-
 /**
  * Return a reference to the current batch, caller must unref.
  */
@@ -350,6 +343,7 @@ fd_context_batch(struct fd_context *ctx)
    if (unlikely(!batch)) {
       batch =
          fd_batch_from_fb(ctx, &ctx->framebuffer);
+      util_copy_framebuffer_state(&batch->framebuffer, &ctx->framebuffer);
       fd_batch_reference(&ctx->batch, batch);
       fd_context_all_dirty(ctx);
    }
@@ -498,22 +492,6 @@ fd_get_device_reset_status(struct pipe_context *pctx)
    return status;
 }
 
-static enum pipe_reset_status
-fd_get_device_reset_status_direct(struct pipe_context *pctx)
-{
-   struct fd_context *ctx = fd_context(pctx);
-   enum pipe_reset_status status_list[] = {
-      [FD_RESET_NO_ERROR] = PIPE_NO_RESET,
-      [FD_RESET_GUILTY] = PIPE_GUILTY_CONTEXT_RESET,
-      [FD_RESET_INNOCENT] = PIPE_INNOCENT_CONTEXT_RESET,
-      [FD_RESET_UNKNOWN] = PIPE_UNKNOWN_CONTEXT_RESET,
-   };
-   enum fd_reset_status fd_status;
-   ASSERTED int ret = fd_pipe_get_reset_status(ctx->pipe, &fd_status);
-   assert(!ret);
-   return status_list[fd_status];
-}
-
 static void
 fd_trace_record_ts(struct u_trace *ut, void *cs, void *timestamps,
                    unsigned idx, bool end_of_pipe)
@@ -611,9 +589,9 @@ fd_context_setup_common_vbos(struct fd_context *ctx)
          .vertex_buffer_index = 0,
          .src_offset = 0,
          .src_format = PIPE_FORMAT_R32G32B32_FLOAT,
-         .src_stride = 12,
       }});
    ctx->solid_vbuf_state.vertexbuf.count = 1;
+   ctx->solid_vbuf_state.vertexbuf.vb[0].stride = 12;
    ctx->solid_vbuf_state.vertexbuf.vb[0].buffer.resource = ctx->solid_vbuf;
 
    /* setup blit_vbuf_state: */
@@ -624,17 +602,17 @@ fd_context_setup_common_vbos(struct fd_context *ctx)
             .vertex_buffer_index = 0,
             .src_offset = 0,
             .src_format = PIPE_FORMAT_R32G32_FLOAT,
-            .src_stride = 8,
          },
          {
             .vertex_buffer_index = 1,
             .src_offset = 0,
             .src_format = PIPE_FORMAT_R32G32B32_FLOAT,
-            .src_stride = 12,
          }});
    ctx->blit_vbuf_state.vertexbuf.count = 2;
+   ctx->blit_vbuf_state.vertexbuf.vb[0].stride = 8;
    ctx->blit_vbuf_state.vertexbuf.vb[0].buffer.resource =
       ctx->blit_texcoord_vbuf;
+   ctx->blit_vbuf_state.vertexbuf.vb[1].stride = 12;
    ctx->blit_vbuf_state.vertexbuf.vb[1].buffer.resource = ctx->solid_vbuf;
 }
 
@@ -679,6 +657,11 @@ fd_context_init(struct fd_context *ctx, struct pipe_screen *pscreen,
 
    ctx->in_fence_fd = -1;
 
+   if (fd_device_version(screen->dev) >= FD_VERSION_ROBUSTNESS) {
+      ctx->context_reset_count = fd_get_reset_count(ctx, true);
+      ctx->global_reset_count = fd_get_reset_count(ctx, false);
+   }
+
    simple_mtx_init(&ctx->gmem_lock, mtx_plain);
 
    /* need some sane default in case gallium frontends don't
@@ -693,19 +676,12 @@ fd_context_init(struct fd_context *ctx, struct pipe_screen *pscreen,
    pctx->flush = fd_context_flush;
    pctx->emit_string_marker = fd_emit_string_marker;
    pctx->set_debug_callback = fd_set_debug_callback;
+   pctx->get_device_reset_status = fd_get_device_reset_status;
    pctx->create_fence_fd = fd_create_pipe_fence_fd;
    pctx->fence_server_sync = fd_pipe_fence_server_sync;
    pctx->fence_server_signal = fd_pipe_fence_server_signal;
    pctx->texture_barrier = fd_texture_barrier;
    pctx->memory_barrier = fd_memory_barrier;
-
-   if (fd_get_features(screen->dev) & FD_FEATURE_DIRECT_RESET) {
-      pctx->get_device_reset_status = fd_get_device_reset_status_direct;
-   } else if(fd_device_version(screen->dev) >= FD_VERSION_ROBUSTNESS) {
-      ctx->context_reset_count = fd_get_reset_count(ctx, true);
-      ctx->global_reset_count = fd_get_reset_count(ctx, false);
-      pctx->get_device_reset_status = fd_get_device_reset_status;
-   }
 
    pctx->stream_uploader = u_upload_create_default(pctx);
    if (!pctx->stream_uploader)
