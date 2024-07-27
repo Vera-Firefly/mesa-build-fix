@@ -93,10 +93,11 @@ sw_screen_create_named(struct sw_winsys *winsys, const char *driver)
 #if defined(GALLIUM_PANFROST)
    if(screen == NULL && strcmp(driver, "panfrost") == 0) {
       int kbase_device_fd = open("/dev/mali0", O_RDWR | O_CLOEXEC | O_NONBLOCK);
-      if(kbase_device_fd == -1) { 
+      if (kbase_device_fd == -1) { 
          printf("PAN_OSMESA: Failed to open kbase device: %s", strerror(errno));
-      }else {
-      	screen = panfrost_create_screen(kbase_device_fd, NULL);
+      } else {
+        struct pipe_screen_config dummy_cfg = { NULL, NULL };
+      	screen = panfrost_create_screen(kbase_device_fd, &dummy_cfg, NULL);
       }
    }
 #endif
