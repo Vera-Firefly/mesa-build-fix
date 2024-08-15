@@ -81,7 +81,7 @@ const struct panfrost_model panfrost_model_list[] = {
 const struct panfrost_model panfrost_unknown_model = {
    .gpu_id = 0,
    .gpu_variant = 0,
-   .name = "Unknown Mali device (Panfrost)",
+   .name = "Unknowm Mali device (Panfrost)",
    .performance_counters = "AAAA",
    .min_rev_anisotropic = NO_ANISO, 
    .tilebuffer_size = 8192, 
@@ -187,6 +187,16 @@ panfrost_query_afbc(const struct pan_kmod_dev_props *props)
    unsigned reg = props->afbc_features;
 
    return (pan_arch(props->gpu_prod_id) >= 5) && (reg == 0);
+}
+
+/* Check for AFRC hardware support. AFRC is introduced in v10. Implementations
+ * may omit it, signaled in bit 25 of TEXTURE_FEATURES_0 property. */
+
+bool
+panfrost_query_afrc(const struct pan_kmod_dev_props *props)
+{
+   return (pan_arch(props->gpu_prod_id) >= 10) &&
+          (props->texture_features[0] & (1 << 25));
 }
 
 /*
