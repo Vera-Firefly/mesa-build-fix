@@ -29,6 +29,9 @@
 #include <sys/types.h>
 
 #include "util/os_file.h"
+#include "util/u_process.h"
+
+#include "freedreno_rd_output.h"
 
 #include "freedreno_drmif.h"
 #include "freedreno_drm_perfetto.h"
@@ -43,6 +46,8 @@ struct fd_device *virtio_device_new(int fd, drmVersionPtr version);
 struct fd_device *kgsl_device_new(int fd);
 #endif
 
+uint64_t os_page_size = 4096;
+
 struct fd_device *
 fd_device_new(int fd)
 {
@@ -51,11 +56,15 @@ fd_device_new(int fd)
    bool use_heap = false;
    bool support_use_heap = true;
 
-/* figure out if we are kgsl or msm drm driver: */
+   os_get_page_size(&os_page_size);
+
+   /* figure out if we are kgsl or msm drm driver: */
 #ifdef HAVE_LIBDRM
    version = drmGetVersion(fd);
-   if (!version)
+   if (!version) {
       ERROR_MSG("cannot get version: %s", strerror(errno));
+      return NULL;
+   }
 #endif
 
    if (version && !strcmp(version->name, "msm")) {
@@ -76,7 +85,7 @@ fd_device_new(int fd)
        */
       use_heap = true;
 #endif
-#if HAVE_FREEDRENO_KGSL
+#ifdef HAVE_FREEDRENO_KGSL
    } else {
       dev = kgsl_device_new(fd);
       support_use_heap = false;
@@ -97,6 +106,9 @@ out:
       return NULL;
 
    fd_drm_perfetto_init();
+
+   fd_rd_dump_env_init();
+   fd_rd_output_init(&dev->rd, util_get_process_name());
 
    p_atomic_set(&dev->refcnt, 1);
    dev->fd = fd;
@@ -190,6 +202,8 @@ fd_device_del(struct fd_device *dev)
 {
    if (!unref(&dev->refcnt))
       return;
+
+   fd_rd_output_fini(&dev->rd);
 
    assert(list_is_empty(&dev->deferred_submits));
    assert(!dev->deferred_submits_fence);

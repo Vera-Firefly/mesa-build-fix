@@ -99,6 +99,7 @@ static const struct debug_named_value fd_debug_options[] = {
    {"nofp16",    FD_DBG_NOFP16,   "Disable mediump precision lowering"},
    {"nohw",      FD_DBG_NOHW,     "Disable submitting commands to the HW"},
    {"nosbin",    FD_DBG_NOSBIN,   "Execute GMEM bins in raster order instead of 'S' pattern"},
+   {"stomp",     FD_DBG_STOMP,    "Enable register stomper"},
    DEBUG_NAMED_VALUE_END
 };
 /* clang-format on */
@@ -279,6 +280,10 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
       return has_compute(screen);
 
    case PIPE_CAP_TEXTURE_TRANSFER_MODES:
+      if (screen->gen >= 6)
+         return PIPE_TEXTURE_TRANSFER_BLIT;
+      return 0;
+
    case PIPE_CAP_PCI_GROUP:
    case PIPE_CAP_PCI_BUS:
    case PIPE_CAP_PCI_DEVICE:
@@ -1186,6 +1191,10 @@ fd_screen_create(int fd,
    screen->dev_info = info;
    screen->info = &screen->dev_info;
 
+   /* HACK: disable lrz for now on a7xx: */
+   if (screen->gen == 7)
+      fd_mesa_debug |= FD_DBG_NOLRZ;
+
    /* explicitly checking for GPU revisions that are known to work.  This
     * may be overly conservative for a3xx, where spoofing the gpu_id with
     * the blob driver seems to generate identical cmdstream dumps.  But
@@ -1211,6 +1220,7 @@ fd_screen_create(int fd,
       fd5_screen_init(pscreen);
       break;
    case 6:
+   case 7:
       fd6_screen_init(pscreen);
       break;
    default:
