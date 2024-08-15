@@ -10,6 +10,8 @@ if with_platform_android
 subdir('u_gralloc')
 endif
 
+subdir('blake3')
+
 files_mesa_util = files(
   'anon_file.h',
   'anon_file.c',
@@ -64,6 +66,8 @@ files_mesa_util = files(
   'memstream.h',
   'mesa-sha1.c',
   'mesa-sha1.h',
+  'mesa-blake3.c',
+  'mesa-blake3.h',
   'os_time.c',
   'os_time.h',
   'os_file.c',
@@ -217,6 +221,7 @@ deps_for_libmesa_util = [
   dep_dl,
   dep_unwind,
   dep_futex,
+  idep_blake3,
   idep_mesautilc11,
   idep_mesautilformat,
 ]
