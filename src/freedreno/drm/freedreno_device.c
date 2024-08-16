@@ -43,6 +43,8 @@ struct fd_device *virtio_device_new(int fd, drmVersionPtr version);
 struct fd_device *kgsl_device_new(int fd);
 #endif
 
+uint64_t os_page_size = 4096;
+
 struct fd_device *
 fd_device_new(int fd)
 {
@@ -51,11 +53,15 @@ fd_device_new(int fd)
    bool use_heap = false;
    bool support_use_heap = true;
 
-/* figure out if we are kgsl or msm drm driver: */
+   os_get_page_size(&os_page_size);
+
+   /* figure out if we are kgsl or msm drm driver: */
 #ifdef HAVE_LIBDRM
    version = drmGetVersion(fd);
-   if (!version)
+   if (!version) {
       ERROR_MSG("cannot get version: %s", strerror(errno));
+      return NULL;
+   }
 #endif
 
    if (version && !strcmp(version->name, "msm")) {
@@ -76,7 +82,7 @@ fd_device_new(int fd)
        */
       use_heap = true;
 #endif
-#if HAVE_FREEDRENO_KGSL
+#ifdef HAVE_FREEDRENO_KGSL
    } else {
       dev = kgsl_device_new(fd);
       support_use_heap = false;
