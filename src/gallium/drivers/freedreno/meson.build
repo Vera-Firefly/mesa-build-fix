@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 
 files_libfreedreno = files(
-  'freedreno_public.h',
   'driinfo_freedreno.h',
   'freedreno_autotune.c',
   'freedreno_autotune.h',

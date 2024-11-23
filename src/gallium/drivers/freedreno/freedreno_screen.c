@@ -1,24 +1,6 @@
 /*
- * Copyright (C) 2012 Rob Clark <robclark@freedesktop.org>
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice (including the next
- * paragraph) shall be included in all copies or substantial portions of the
- * Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright © 2012 Rob Clark <robclark@freedesktop.org>
+ * SPDX-License-Identifier: MIT
  *
  * Authors:
  *    Rob Clark <robclark@freedesktop.org>
@@ -47,7 +29,6 @@
 
 #include "freedreno_fence.h"
 #include "freedreno_perfetto.h"
-#include "freedreno_public.h"
 #include "freedreno_query.h"
 #include "freedreno_resource.h"
 #include "freedreno_screen.h"
@@ -82,7 +63,6 @@ static const struct debug_named_value fd_debug_options[] = {
    {"serialc",   FD_DBG_SERIALC,  "Disable asynchronous shader compile"},
    {"shaderdb",  FD_DBG_SHADERDB, "Enable shaderdb output"},
    {"flush",     FD_DBG_FLUSH,    "Force flush after every draw"},
-   {"deqp",      FD_DBG_DEQP,     "Enable dEQP hacks"},
    {"inorder",   FD_DBG_INORDER,  "Disable reordering for draws/blits"},
    {"bstat",     FD_DBG_BSTAT,    "Print batch stats at context destroy"},
    {"nogrow",    FD_DBG_NOGROW,   "Disable \"growable\" cmdstream buffers, even if kernel supports it"},
@@ -259,10 +239,8 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
    case PIPE_CAP_DEPTH_BOUNDS_TEST:
       return is_a6xx(screen);
 
-   case PIPE_CAP_VERTEX_BUFFER_OFFSET_4BYTE_ALIGNED_ONLY:
-   case PIPE_CAP_VERTEX_BUFFER_STRIDE_4BYTE_ALIGNED_ONLY:
-   case PIPE_CAP_VERTEX_ELEMENT_SRC_OFFSET_4BYTE_ALIGNED_ONLY:
-      return is_a2xx(screen);
+   case PIPE_CAP_VERTEX_INPUT_ALIGNMENT:
+      return is_a2xx(screen) ? PIPE_VERTEX_INPUT_ALIGNMENT_4BYTE : PIPE_VERTEX_INPUT_ALIGNMENT_NONE;
 
    case PIPE_CAP_FS_COORD_PIXEL_CENTER_INTEGER:
       return is_a2xx(screen);
@@ -630,11 +608,6 @@ fd_screen_get_param(struct pipe_screen *pscreen, enum pipe_cap param)
       return 0;
    case PIPE_CAP_THROTTLE:
       return screen->driconf.enable_throttling;
-   case PIPE_CAP_DMABUF:
-      if (fd_get_features(screen->dev) & FD_FEATURE_IMPORT_DMABUF)
-         return DRM_PRIME_CAP_IMPORT;
-      /* Fallthough to default case */
-      FALLTHROUGH;
    default:
       return u_pipe_screen_get_param_defaults(pscreen, param);
    }
@@ -654,15 +627,6 @@ fd_screen_get_paramf(struct pipe_screen *pscreen, enum pipe_capf param)
       return 0.1f;
    case PIPE_CAPF_MAX_LINE_WIDTH:
    case PIPE_CAPF_MAX_LINE_WIDTH_AA:
-      /* NOTE: actual value is 127.0f, but this is working around a deqp
-       * bug.. dEQP-GLES3.functional.rasterization.primitives.lines_wide
-       * uses too small of a render target size, and gets confused when
-       * the lines start going offscreen.
-       *
-       * See: https://code.google.com/p/android/issues/detail?id=206513
-       */
-      if (FD_DBG(DEQP))
-         return 48.0f;
       return 127.0f;
    case PIPE_CAPF_MAX_POINT_SIZE:
    case PIPE_CAPF_MAX_POINT_SIZE_AA:
@@ -1072,7 +1036,7 @@ fd_screen_create(int fd,
                  const struct pipe_screen_config *config,
                  struct renderonly *ro)
 {
-   struct fd_device *dev = fd_device_new(fd);
+   struct fd_device *dev = fd_device_new_dup(fd);
    if (!dev)
       return NULL;
 
@@ -1178,9 +1142,25 @@ fd_screen_create(int fd,
 
    screen->has_syncobj = fd_has_syncobj(screen->dev);
 
+   /* parse driconf configuration now for device specific overrides: */
+   driParseConfigFiles(config->options, config->options_info, 0, "msm",
+                       NULL, fd_dev_name(screen->dev_id), NULL, 0, NULL, 0);
+
+   screen->driconf.conservative_lrz =
+         !driQueryOptionb(config->options, "disable_conservative_lrz");
+   screen->driconf.enable_throttling =
+         !driQueryOptionb(config->options, "disable_throttling");
+   screen->driconf.dual_color_blend_by_location =
+         driQueryOptionb(config->options, "dual_color_blend_by_location");
+
    struct sysinfo si;
    sysinfo(&si);
    screen->ram_size = si.totalram;
+
+   DBG("Pipe Info:");
+   DBG(" GPU-id:          %s", fd_dev_name(screen->dev_id));
+   DBG(" Chip-id:         0x%016"PRIx64, screen->chip_id);
+   DBG(" GMEM size:       0x%08x", screen->gmemsize_bytes);
 
    const struct fd_dev_info info = fd_dev_info(screen->dev_id);
    if (!info.chip) {
@@ -1190,10 +1170,6 @@ fd_screen_create(int fd,
 
    screen->dev_info = info;
    screen->info = &screen->dev_info;
-
-   /* HACK: disable lrz for now on a7xx: */
-   if (screen->gen == 7)
-      fd_mesa_debug |= FD_DBG_NOLRZ;
 
    /* explicitly checking for GPU revisions that are known to work.  This
     * may be overly conservative for a3xx, where spoofing the gpu_id with
@@ -1234,6 +1210,11 @@ fd_screen_create(int fd,
    for (unsigned i = 0; i <= MESA_PRIM_COUNT; i++)
       if (screen->primtypes[i])
          screen->primtypes_mask |= (1 << i);
+
+   if (FD_DBG(PERFC)) {
+      screen->perfcntr_groups =
+         fd_perfcntrs(screen->dev_id, &screen->num_perfcntr_groups);
+   }
 
    /* NOTE: don't enable if we have too old of a kernel to support
     * growable cmdstream buffers, since memory requirement for cmdstream

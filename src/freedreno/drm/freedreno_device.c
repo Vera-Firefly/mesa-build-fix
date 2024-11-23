@@ -1,24 +1,6 @@
 /*
- * Copyright (C) 2012-2018 Rob Clark <robclark@freedesktop.org>
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice (including the next
- * paragraph) shall be included in all copies or substantial portions of the
- * Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright © 2012-2018 Rob Clark <robclark@freedesktop.org>
+ * SPDX-License-Identifier: MIT
  *
  * Authors:
  *    Rob Clark <robclark@freedesktop.org>
@@ -42,32 +24,25 @@ struct fd_device *msm_device_new(int fd, drmVersionPtr version);
 struct fd_device *virtio_device_new(int fd, drmVersionPtr version);
 #endif
 
-#ifdef HAVE_FREEDRENO_KGSL
-struct fd_device *kgsl_device_new(int fd);
-#endif
-
 uint64_t os_page_size = 4096;
 
 struct fd_device *
 fd_device_new(int fd)
 {
    struct fd_device *dev = NULL;
-   drmVersionPtr version = NULL;
+   drmVersionPtr version;
    bool use_heap = false;
-   bool support_use_heap = true;
 
    os_get_page_size(&os_page_size);
 
    /* figure out if we are kgsl or msm drm driver: */
-#ifdef HAVE_LIBDRM
    version = drmGetVersion(fd);
    if (!version) {
       ERROR_MSG("cannot get version: %s", strerror(errno));
       return NULL;
    }
-#endif
 
-   if (version && !strcmp(version->name, "msm")) {
+   if (!strcmp(version->name, "msm")) {
       DEBUG_MSG("msm DRM device");
       if (version->version_major != 1) {
          ERROR_MSG("unsupported version: %u.%u.%u", version->version_major,
@@ -77,7 +52,7 @@ fd_device_new(int fd)
 
       dev = msm_device_new(fd, version);
 #ifdef HAVE_FREEDRENO_VIRTIO
-   } else if (version && !strcmp(version->name, "virtio_gpu")) {
+   } else if (!strcmp(version->name, "virtio_gpu")) {
       DEBUG_MSG("virtio_gpu DRM device");
       dev = virtio_device_new(fd, version);
       /* Only devices that support a hypervisor are a6xx+, so avoid the
@@ -85,12 +60,10 @@ fd_device_new(int fd)
        */
       use_heap = true;
 #endif
-#ifdef HAVE_FREEDRENO_KGSL
-   } else {
+#if HAVE_FREEDRENO_KGSL
+   } else if (!strcmp(version->name, "kgsl")) {
+      DEBUG_MSG("kgsl DRM device");
       dev = kgsl_device_new(fd);
-      support_use_heap = false;
-      if (dev)
-         goto out;
 #endif
    }
 
@@ -138,7 +111,7 @@ out:
       fd_pipe_del(pipe);
    }
 
-   if (support_use_heap && use_heap) {
+   if (use_heap) {
       dev->ring_heap = fd_bo_heap_new(dev, RING_FLAGS);
       dev->default_heap = fd_bo_heap_new(dev, 0);
    }
@@ -255,12 +228,6 @@ bool
 fd_dbg(void)
 {
    return debug_get_option_libgl();
-}
-
-uint32_t
-fd_get_features(struct fd_device *dev)
-{
-    return dev->features;
 }
 
 bool
