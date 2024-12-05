@@ -20,6 +20,11 @@ project(
 if host_machine.system() == 'darwin'
   add_languages('objc', native : false)
   add_project_arguments('-fobjc-arc', language : 'objc')
+  libname_suffix = 'dylib'
+elif host_machine.system() == 'windows'
+  libname_suffix = 'dll'
+else
+  libname_suffix = 'so'
 endif
 
 cc = meson.get_compiler('c')
@@ -1999,9 +2004,9 @@ if dep_unwind.found()
 endif
 
 if with_osmesa
-  # if not with_gallium_swrast
-  #   error('OSMesa gallium requires gallium softpipe or llvmpipe.')
-  # endif
+  if not with_gallium_swrast
+    error('OSMesa gallium requires gallium softpipe or llvmpipe.')
+  endif
   if host_machine.system() == 'windows'
     osmesa_lib_name = 'osmesa'
   else
