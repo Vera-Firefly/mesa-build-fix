@@ -1,6 +1,6 @@
 ## About This Project
 
-* This project is based on the Mesa project
+* This project is based on the [Mesa](https://gitlab.freedesktop.org/mesa/mesa/) project
 * Originally licensed under the MIT License
 * Significant modifications have been made to adapt it for [specific purpose or functionality].
 
