@@ -6,6 +6,6 @@
 
 ### Licenses
 - Original Mesa code: MIT License
-- New contributions: [Your License, e.g., GPLv3 or MIT]
+- New contributions: [GPLv3 or MIT]
 
 For details about the licenses, see the `LICENSE` files.
