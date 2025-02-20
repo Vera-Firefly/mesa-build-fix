@@ -21,6 +21,7 @@ files_libfreedreno = files(
   'freedreno_gmem.h',
   'freedreno_program.c',
   'freedreno_program.h',
+  'freedreno_public.h',
   'freedreno_query.c',
   'freedreno_query.h',
   'freedreno_query_acc.c',
