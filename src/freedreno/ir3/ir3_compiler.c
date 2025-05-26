@@ -263,6 +263,14 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
       compiler->has_early_preamble = false;
    }
 
+   if (dev_info->compute_lb_size) {
+      compiler->compute_lb_size = dev_info->compute_lb_size;
+   } else {
+      compiler->compute_lb_size =
+         compiler->max_const_compute * 16 /* bytes/vec4 */ *
+         compiler->wave_granularity + compiler->local_mem_size;
+   }
+
    /* This is just a guess for a4xx. */
    compiler->pvtmem_per_fiber_align = compiler->gen >= 4 ? 512 : 128;
    /* TODO: implement private memory on earlier gen's */
@@ -351,6 +359,9 @@ ir3_compiler_create(struct fd_device *dev, const struct fd_dev_id *dev_id,
    compiler->nir_options.support_indirect_inputs = (uint8_t)BITFIELD_MASK(PIPE_SHADER_TYPES);
    compiler->nir_options.support_indirect_outputs = (uint8_t)BITFIELD_MASK(PIPE_SHADER_TYPES);
 
+   if (!options->disable_cache)
+      ir3_disk_cache_init(compiler);
+
    return compiler;
 }
 
@@ -358,4 +369,10 @@ const nir_shader_compiler_options *
 ir3_get_compiler_options(struct ir3_compiler *compiler)
 {
    return &compiler->nir_options;
+}
+
+const char *
+ir3_shader_debug_as_string()
+{
+   return debug_dump_flags(shader_debug_options, ir3_shader_debug);
 }

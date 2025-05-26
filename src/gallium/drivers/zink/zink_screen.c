@@ -157,7 +157,7 @@ static VkInstance instance;
 static const char *
 zink_get_vendor(struct pipe_screen *pscreen)
 {
-   return "Mesa Repaired";
+   return "Mesa";
 }
 
 static const char *
@@ -306,12 +306,9 @@ disk_cache_init(struct zink_screen *screen)
    /* Hash in the zink driver build. */
    const struct build_id_note *note =
        build_id_find_nhdr_for_addr(disk_cache_init);
-   if (note != NULL)
-   {
-       unsigned build_id_len = build_id_length(note);
-       assert(note && build_id_len == 20); /* blake3 */
-       _mesa_blake3_update(&ctx, build_id_data(note), build_id_len);
-   }
+   unsigned build_id_len = build_id_length(note);
+   assert(note && build_id_len == 20); /* blake3 */
+   _mesa_blake3_update(&ctx, build_id_data(note), build_id_len);
 #endif
 
    /* Hash in the Vulkan pipeline cache UUID to identify the combination of
@@ -452,75 +449,6 @@ zink_screen_get_pipeline_cache(struct zink_screen *screen, struct zink_program *
       util_queue_add_job(&screen->cache_get_thread, pg, &pg->cache_fence, cache_get_job, NULL, 0);
 }
 
-static int
-zink_get_compute_param(struct pipe_screen *pscreen, enum pipe_shader_ir ir_type,
-                       enum pipe_compute_cap param, void *ret)
-{
-   struct zink_screen *screen = zink_screen(pscreen);
-#define RET(x) do {                  \
-   if (ret)                          \
-      memcpy(ret, x, sizeof(x));     \
-   return sizeof(x);                 \
-} while (0)
-
-   switch (param) {
-   case PIPE_COMPUTE_CAP_ADDRESS_BITS:
-      RET((uint32_t []){ 64 });
-
-   case PIPE_COMPUTE_CAP_IR_TARGET:
-      if (ret)
-         strcpy(ret, "nir");
-      return 4;
-
-   case PIPE_COMPUTE_CAP_GRID_DIMENSION:
-      RET((uint64_t []) { 3 });
-
-   case PIPE_COMPUTE_CAP_MAX_GRID_SIZE:
-      RET(((uint64_t []) { screen->info.props.limits.maxComputeWorkGroupCount[0],
-                           screen->info.props.limits.maxComputeWorkGroupCount[1],
-                           screen->info.props.limits.maxComputeWorkGroupCount[2] }));
-
-   case PIPE_COMPUTE_CAP_MAX_BLOCK_SIZE:
-      /* MaxComputeWorkGroupSize[0..2] */
-      RET(((uint64_t []) {screen->info.props.limits.maxComputeWorkGroupSize[0],
-                          screen->info.props.limits.maxComputeWorkGroupSize[1],
-                          screen->info.props.limits.maxComputeWorkGroupSize[2]}));
-
-   case PIPE_COMPUTE_CAP_MAX_THREADS_PER_BLOCK:
-   case PIPE_COMPUTE_CAP_MAX_VARIABLE_THREADS_PER_BLOCK:
-      RET((uint64_t []) { screen->info.props.limits.maxComputeWorkGroupInvocations });
-
-   case PIPE_COMPUTE_CAP_MAX_LOCAL_SIZE:
-      RET((uint64_t []) { screen->info.props.limits.maxComputeSharedMemorySize });
-
-   case PIPE_COMPUTE_CAP_IMAGES_SUPPORTED:
-      RET((uint32_t []) { 1 });
-
-   case PIPE_COMPUTE_CAP_SUBGROUP_SIZES:
-      RET((uint32_t []) { screen->info.props11.subgroupSize });
-
-   case PIPE_COMPUTE_CAP_MAX_MEM_ALLOC_SIZE:
-      RET((uint64_t []) { screen->clamp_video_mem });
-
-   case PIPE_COMPUTE_CAP_MAX_GLOBAL_SIZE:
-      RET((uint64_t []) { screen->total_video_mem });
-
-   case PIPE_COMPUTE_CAP_MAX_COMPUTE_UNITS:
-      // no way in vulkan to retrieve this information.
-      RET((uint32_t []) { 1 });
-
-   case PIPE_COMPUTE_CAP_MAX_SUBGROUPS:
-   case PIPE_COMPUTE_CAP_MAX_CLOCK_FREQUENCY:
-   case PIPE_COMPUTE_CAP_MAX_PRIVATE_SIZE:
-   case PIPE_COMPUTE_CAP_MAX_INPUT_SIZE:
-      // XXX: I think these are for Clover...
-      return 0;
-
-   default:
-      unreachable("unknown compute param");
-   }
-}
-
 static uint32_t
 get_smallest_buffer_heap(struct zink_screen *screen)
 {
@@ -565,57 +493,52 @@ have_fp32_filter_linear(struct zink_screen *screen)
    return true;
 }
 
-static int
-zink_get_shader_param(struct pipe_screen *pscreen,
-                       gl_shader_stage shader,
-                       enum pipe_shader_cap param)
+static void
+zink_init_shader_caps(struct zink_screen *screen)
 {
-   struct zink_screen *screen = zink_screen(pscreen);
+   for (unsigned i = 0; i <= PIPE_SHADER_COMPUTE; i++) {
+      struct pipe_shader_caps *caps =
+         (struct pipe_shader_caps *)&screen->base.shader_caps[i];
 
-   switch (param) {
-   case PIPE_SHADER_CAP_MAX_INSTRUCTIONS:
-      switch (shader) {
-      case MESA_SHADER_FRAGMENT:
-      case MESA_SHADER_VERTEX:
-         return INT_MAX;
+      switch (i) {
       case MESA_SHADER_TESS_CTRL:
       case MESA_SHADER_TESS_EVAL:
-         if (screen->info.feats.features.tessellationShader &&
-             screen->info.have_KHR_maintenance2)
-            return INT_MAX;
+         if (!screen->info.feats.features.tessellationShader ||
+             !screen->info.have_KHR_maintenance2)
+            continue;
          break;
-
       case MESA_SHADER_GEOMETRY:
-         if (screen->info.feats.features.geometryShader)
-            return INT_MAX;
+         if (!screen->info.feats.features.geometryShader)
+            continue;
          break;
-
-      case MESA_SHADER_COMPUTE:
-         return INT_MAX;
       default:
          break;
       }
-      return 0;
-   case PIPE_SHADER_CAP_MAX_ALU_INSTRUCTIONS:
-   case PIPE_SHADER_CAP_MAX_TEX_INSTRUCTIONS:
-   case PIPE_SHADER_CAP_MAX_TEX_INDIRECTIONS:
-   case PIPE_SHADER_CAP_MAX_CONTROL_FLOW_DEPTH:
-      return INT_MAX;
 
-   case PIPE_SHADER_CAP_MAX_INPUTS: {
-      uint32_t max = 0;
-      switch (shader) {
+      caps->max_instructions =
+      caps->max_alu_instructions =
+      caps->max_tex_instructions =
+      caps->max_tex_indirections =
+      caps->max_control_flow_depth = INT_MAX;
+
+      unsigned max_in = 0;
+      unsigned max_out = 0;
+      switch (i) {
       case MESA_SHADER_VERTEX:
-         max = MIN2(screen->info.props.limits.maxVertexInputAttributes, PIPE_MAX_ATTRIBS);
+         max_in = MIN2(screen->info.props.limits.maxVertexInputAttributes, PIPE_MAX_ATTRIBS);
+         max_out = screen->info.props.limits.maxVertexOutputComponents / 4;
          break;
       case MESA_SHADER_TESS_CTRL:
-         max = screen->info.props.limits.maxTessellationControlPerVertexInputComponents / 4;
+         max_in = screen->info.props.limits.maxTessellationControlPerVertexInputComponents / 4;
+         max_out = screen->info.props.limits.maxTessellationControlPerVertexOutputComponents / 4;
          break;
       case MESA_SHADER_TESS_EVAL:
-         max = screen->info.props.limits.maxTessellationEvaluationInputComponents / 4;
+         max_in = screen->info.props.limits.maxTessellationEvaluationInputComponents / 4;
+         max_out = screen->info.props.limits.maxTessellationEvaluationOutputComponents / 4;
          break;
       case MESA_SHADER_GEOMETRY:
-         max = screen->info.props.limits.maxGeometryInputComponents / 4;
+         max_in = screen->info.props.limits.maxGeometryInputComponents / 4;
+         max_out = screen->info.props.limits.maxGeometryOutputComponents / 4;
          break;
       case MESA_SHADER_FRAGMENT:
          /* intel drivers report fewer components, but it's a value that's compatible
@@ -623,141 +546,136 @@ zink_get_shader_param(struct pipe_screen *pscreen,
           */
          if (zink_driverid(screen) == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA ||
              zink_driverid(screen) == VK_DRIVER_ID_INTEL_PROPRIETARY_WINDOWS)
-            return 32;
-         max = screen->info.props.limits.maxFragmentInputComponents / 4;
+            max_in = 32;
+         else
+            max_in = screen->info.props.limits.maxFragmentInputComponents / 4;
+
+         max_out = screen->info.props.limits.maxColorAttachments;
          break;
       default:
-         return 0; /* unsupported stage */
+         break;
       }
-      switch (shader) {
+
+      switch (i) {
       case MESA_SHADER_VERTEX:
       case MESA_SHADER_TESS_EVAL:
       case MESA_SHADER_GEOMETRY:
          /* last vertex stage must support streamout, and this is capped in glsl compiler */
-         return MIN2(max, MAX_VARYING);
-      default: break;
-      }
-      return MIN2(max, 64); // prevent overflowing struct shader_info::inputs_read
-   }
-
-   case PIPE_SHADER_CAP_MAX_OUTPUTS: {
-      uint32_t max = 0;
-      switch (shader) {
-      case MESA_SHADER_VERTEX:
-         max = screen->info.props.limits.maxVertexOutputComponents / 4;
-         break;
-      case MESA_SHADER_TESS_CTRL:
-         max = screen->info.props.limits.maxTessellationControlPerVertexOutputComponents / 4;
-         break;
-      case MESA_SHADER_TESS_EVAL:
-         max = screen->info.props.limits.maxTessellationEvaluationOutputComponents / 4;
-         break;
-      case MESA_SHADER_GEOMETRY:
-         max = screen->info.props.limits.maxGeometryOutputComponents / 4;
-         break;
-      case MESA_SHADER_FRAGMENT:
-         max = screen->info.props.limits.maxColorAttachments;
+         caps->max_inputs = MIN2(max_in, MAX_VARYING);
          break;
       default:
-         return 0; /* unsupported stage */
+         /* prevent overflowing struct shader_info::inputs_read */
+         caps->max_inputs = MIN2(max_in, 64);
+         break;
       }
-      return MIN2(max, 64); // prevent overflowing struct shader_info::outputs_read/written
-   }
 
-   case PIPE_SHADER_CAP_MAX_CONST_BUFFER0_SIZE:
+      /* prevent overflowing struct shader_info::outputs_read/written */
+      caps->max_outputs = MIN2(max_out, 64);
+
       /* At least 16384 is guaranteed by VK spec */
       assert(screen->info.props.limits.maxUniformBufferRange >= 16384);
       /* but Gallium can't handle values that are too big */
-      return MIN3(get_smallest_buffer_heap(screen),
-                  screen->info.props.limits.maxUniformBufferRange, BITFIELD_BIT(31));
+      caps->max_const_buffer0_size =
+         MIN3(get_smallest_buffer_heap(screen),
+              screen->info.props.limits.maxUniformBufferRange, BITFIELD_BIT(31));
 
-   case PIPE_SHADER_CAP_MAX_CONST_BUFFERS:
-      return  MIN2(screen->info.props.limits.maxPerStageDescriptorUniformBuffers,
-                   PIPE_MAX_CONSTANT_BUFFERS);
+      caps->max_const_buffers =
+         MIN2(screen->info.props.limits.maxPerStageDescriptorUniformBuffers,
+              PIPE_MAX_CONSTANT_BUFFERS);
 
-   case PIPE_SHADER_CAP_MAX_TEMPS:
-      return INT_MAX;
+      caps->max_temps = INT_MAX;
+      caps->integers = true;
+      caps->indirect_const_addr = true;
+      caps->indirect_temp_addr = true;
 
-   case PIPE_SHADER_CAP_INTEGERS:
-      return 1;
+      /* enabling this breaks GTF-GL46.gtf21.GL2Tests.glGetUniform.glGetUniform */
+      caps->fp16_const_buffers = false;
+         //screen->info.feats11.uniformAndStorageBuffer16BitAccess ||
+         //(screen->info.have_KHR_16bit_storage && screen->info.storage_16bit_feats.uniformAndStorageBuffer16BitAccess);
 
-   case PIPE_SHADER_CAP_INDIRECT_CONST_ADDR:
-   case PIPE_SHADER_CAP_INDIRECT_TEMP_ADDR:
-      return 1;
+      /* spirv requires 32bit derivative srcs and dests */
+      caps->fp16_derivatives = false;
 
-   case PIPE_SHADER_CAP_SUBROUTINES:
-   case PIPE_SHADER_CAP_INT64_ATOMICS:
-   case PIPE_SHADER_CAP_GLSL_16BIT_CONSTS:
-      return 0; /* not implemented */
+      caps->fp16 =
+         screen->info.feats12.shaderFloat16 ||
+         (screen->info.have_KHR_shader_float16_int8 &&
+          screen->info.shader_float16_int8_feats.shaderFloat16);
 
-   case PIPE_SHADER_CAP_FP16_CONST_BUFFERS:
-      //enabling this breaks GTF-GL46.gtf21.GL2Tests.glGetUniform.glGetUniform
-      //return screen->info.feats11.uniformAndStorageBuffer16BitAccess ||
-             //(screen->info.have_KHR_16bit_storage && screen->info.storage_16bit_feats.uniformAndStorageBuffer16BitAccess);
-      return 0;
-   case PIPE_SHADER_CAP_FP16_DERIVATIVES:
-      return 0; //spirv requires 32bit derivative srcs and dests
-   case PIPE_SHADER_CAP_FP16:
-      return screen->info.feats12.shaderFloat16 ||
-             (screen->info.have_KHR_shader_float16_int8 &&
-              screen->info.shader_float16_int8_feats.shaderFloat16);
+      caps->int16 = screen->info.feats.features.shaderInt16;
 
-   case PIPE_SHADER_CAP_INT16:
-      return screen->info.feats.features.shaderInt16;
+      caps->max_texture_samplers =
+      caps->max_sampler_views =
+         MIN2(MIN2(screen->info.props.limits.maxPerStageDescriptorSamplers,
+                   screen->info.props.limits.maxPerStageDescriptorSampledImages),
+              PIPE_MAX_SAMPLERS);
 
-   case PIPE_SHADER_CAP_TGSI_SQRT_SUPPORTED:
-      return 0; /* not implemented */
+      /* TODO: this limitation is dumb, and will need some fixes in mesa */
+      caps->max_shader_buffers =
+         MIN2(screen->info.props.limits.maxPerStageDescriptorStorageBuffers,
+              PIPE_MAX_SHADER_BUFFERS);
 
-   case PIPE_SHADER_CAP_MAX_TEXTURE_SAMPLERS:
-   case PIPE_SHADER_CAP_MAX_SAMPLER_VIEWS:
-      return MIN2(MIN2(screen->info.props.limits.maxPerStageDescriptorSamplers,
-                       screen->info.props.limits.maxPerStageDescriptorSampledImages),
-                  PIPE_MAX_SAMPLERS);
-
-   case PIPE_SHADER_CAP_TGSI_ANY_INOUT_DECL_RANGE:
-      return 0; /* no idea */
-
-   case PIPE_SHADER_CAP_MAX_SHADER_BUFFERS:
-      switch (shader) {
+      switch (i) {
       case MESA_SHADER_VERTEX:
       case MESA_SHADER_TESS_CTRL:
       case MESA_SHADER_TESS_EVAL:
       case MESA_SHADER_GEOMETRY:
          if (!screen->info.feats.features.vertexPipelineStoresAndAtomics)
-            return 0;
+            caps->max_shader_buffers = 0;
          break;
-
       case MESA_SHADER_FRAGMENT:
          if (!screen->info.feats.features.fragmentStoresAndAtomics)
-            return 0;
+            caps->max_shader_buffers = 0;
          break;
-
       default:
          break;
       }
 
-      /* TODO: this limitation is dumb, and will need some fixes in mesa */
-      return MIN2(screen->info.props.limits.maxPerStageDescriptorStorageBuffers, PIPE_MAX_SHADER_BUFFERS);
+      caps->supported_irs = (1 << PIPE_SHADER_IR_NIR) | (1 << PIPE_SHADER_IR_TGSI);
 
-   case PIPE_SHADER_CAP_SUPPORTED_IRS:
-      return (1 << PIPE_SHADER_IR_NIR) | (1 << PIPE_SHADER_IR_TGSI);
-
-   case PIPE_SHADER_CAP_MAX_SHADER_IMAGES:
       if (screen->info.feats.features.shaderStorageImageExtendedFormats &&
-          screen->info.feats.features.shaderStorageImageWriteWithoutFormat)
-         return MIN2(screen->info.props.limits.maxPerStageDescriptorStorageImages,
-                     ZINK_MAX_SHADER_IMAGES);
-      return 0;
+          screen->info.feats.features.shaderStorageImageWriteWithoutFormat) {
+         caps->max_shader_images =
+            MIN2(screen->info.props.limits.maxPerStageDescriptorStorageImages,
+                 ZINK_MAX_SHADER_IMAGES);
+      }
 
-   case PIPE_SHADER_CAP_MAX_HW_ATOMIC_COUNTERS:
-   case PIPE_SHADER_CAP_MAX_HW_ATOMIC_COUNTER_BUFFERS:
-      return 0; /* not implemented */
-   case PIPE_SHADER_CAP_CONT_SUPPORTED:
-      return 1;
+      caps->cont_supported = true;
    }
+}
 
-   /* should only get here on unhandled cases */
-   return 0;
+static void
+zink_init_compute_caps(struct zink_screen *screen)
+{
+   struct pipe_compute_caps *caps =
+      (struct pipe_compute_caps *)&screen->base.compute_caps;
+
+   caps->address_bits = 64;
+
+   caps->grid_dimension = 3;
+
+   caps->max_grid_size[0] = screen->info.props.limits.maxComputeWorkGroupCount[0];
+   caps->max_grid_size[1] = screen->info.props.limits.maxComputeWorkGroupCount[1];
+   caps->max_grid_size[2] = screen->info.props.limits.maxComputeWorkGroupCount[2];
+
+   /* MaxComputeWorkGroupSize[0..2] */
+   caps->max_block_size[0] = screen->info.props.limits.maxComputeWorkGroupSize[0];
+   caps->max_block_size[1] = screen->info.props.limits.maxComputeWorkGroupSize[1];
+   caps->max_block_size[2] = screen->info.props.limits.maxComputeWorkGroupSize[2];
+
+   caps->max_threads_per_block =
+   caps->max_variable_threads_per_block =
+      screen->info.props.limits.maxComputeWorkGroupInvocations;
+
+   caps->max_local_size =
+      screen->info.props.limits.maxComputeSharedMemorySize;
+
+   caps->images_supported = true;
+   caps->subgroup_sizes = screen->info.props11.subgroupSize;
+   caps->max_mem_alloc_size = screen->clamp_video_mem;
+   caps->max_global_size = screen->total_video_mem;
+   /* no way in vulkan to retrieve this information. */
+   caps->max_compute_units = 1;
+   caps->max_subgroups = screen->info.props13.maxComputeWorkgroupSubgroups;
 }
 
 static void
@@ -1193,6 +1111,20 @@ zink_init_screen_caps(struct zink_screen *screen)
 
    caps->post_depth_coverage = screen->info.have_EXT_post_depth_coverage;
 
+   caps->cl_gl_sharing = caps->dmabuf && screen->info.have_KHR_external_semaphore_fd;
+   switch (zink_driverid(screen)) {
+   case VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA:
+      caps->linear_image_pitch_alignment = 1;
+      break;
+   /* AMD requires 256 */
+   case VK_DRIVER_ID_AMD_PROPRIETARY:
+   case VK_DRIVER_ID_MESA_RADV:
+   default:
+      caps->linear_image_pitch_alignment = 256;
+      break;
+   }
+   caps->linear_image_base_address_alignment = 1;
+
    caps->string_marker = screen->instance_info->have_EXT_debug_utils;
 
    caps->min_line_width =
@@ -1228,6 +1160,13 @@ zink_init_screen_caps(struct zink_screen *screen)
       screen->info.props.limits.maxSamplerAnisotropy : 1.0f;
 
    caps->max_texture_lod_bias = screen->info.props.limits.maxSamplerLodBias;
+
+   if (screen->info.feats12.subgroupBroadcastDynamicId && screen->info.feats12.shaderSubgroupExtendedTypes && screen->info.feats.features.shaderFloat64) {
+      caps->shader_subgroup_size = screen->info.subgroup.subgroupSize;
+      caps->shader_subgroup_supported_stages = screen->info.subgroup.supportedStages & BITFIELD_MASK(MESA_SHADER_STAGES);
+      caps->shader_subgroup_supported_features = screen->info.subgroup.supportedOperations & BITFIELD_MASK(PIPE_SHADER_SUBGROUP_NUM_FEATURES);
+      caps->shader_subgroup_quad_all_stages = screen->info.subgroup.quadOperationsInAllStages;
+   }
 }
 
 static VkSampleCountFlagBits
@@ -1689,6 +1628,7 @@ choose_pdev(struct zink_screen *screen, int64_t dev_major, int64_t dev_minor, ui
       VkPhysicalDevice *pdevs;
       VkResult result = VKSCR(EnumeratePhysicalDevices)(screen->instance, &pdev_count, NULL);
       if (result != VK_SUCCESS) {
+         if (!screen->driver_name_is_inferred)
             mesa_loge("ZINK: vkEnumeratePhysicalDevices failed (%s)", vk_Result_to_str(result));
          return;
       }
@@ -1698,6 +1638,7 @@ choose_pdev(struct zink_screen *screen, int64_t dev_major, int64_t dev_minor, ui
 
       pdevs = malloc(sizeof(*pdevs) * pdev_count);
       if (!pdevs) {
+         if (!screen->driver_name_is_inferred)
             mesa_loge("ZINK: failed to allocate pdevs!");
          return;
       }
@@ -1727,6 +1668,7 @@ choose_pdev(struct zink_screen *screen, int64_t dev_major, int64_t dev_minor, ui
       unsigned pdev_count = 1;
       VkResult result = VKSCR(EnumeratePhysicalDevices)(screen->instance, &pdev_count, &pdev);
       if (result != VK_SUCCESS && result != VK_INCOMPLETE) {
+         if (!screen->driver_name_is_inferred)
             mesa_loge("ZINK: vkEnumeratePhysicalDevices failed (%s)", vk_Result_to_str(result));
          return;
       }
@@ -1737,7 +1679,7 @@ choose_pdev(struct zink_screen *screen, int64_t dev_major, int64_t dev_minor, ui
    VKSCR(GetPhysicalDeviceProperties)(screen->pdev, &screen->info.props);
 
    /* allow software rendering only if forced by the user */
-   if (!cpu && screen->info.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
+   if (((!cpu || screen->driver_name_is_inferred) && screen->info.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)) {
       screen->pdev = VK_NULL_HANDLE;
       return;
    }
@@ -3285,10 +3227,12 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
 
    struct zink_screen *screen = rzalloc(NULL, struct zink_screen);
    if (!screen) {
+      if (!config || !config->driver_name_is_inferred)
          mesa_loge("ZINK: failed to allocate screen");
       return NULL;
    }
 
+   screen->driver_name_is_inferred = config && config->driver_name_is_inferred;
    screen->drm_fd = -1;
 
    glsl_type_singleton_init_or_ref();
@@ -3306,8 +3250,9 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
 
    u_trace_state_init();
 
-   screen->loader_lib = (void*) strtoul(getenv("VULKAN_PTR"), NULL, 0x10);
+   screen->loader_lib = util_dl_open(VK_LIBNAME);
    if (!screen->loader_lib) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("ZINK: failed to load "VK_LIBNAME);
       goto fail;
    }
@@ -3316,6 +3261,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
    screen->vk_GetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)util_dl_get_proc_address(screen->loader_lib, "vkGetDeviceProcAddr");
    if (!screen->vk_GetInstanceProcAddr ||
        !screen->vk_GetDeviceProcAddr) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("ZINK: failed to get proc address");
       goto fail;
    }
@@ -3345,6 +3291,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
    if (zink_debug & ZINK_DEBUG_VALIDATION) {
       if (!screen->instance_info->have_layer_KHRONOS_validation &&
           !screen->instance_info->have_layer_LUNARG_standard_validation) {
+         if (!screen->driver_name_is_inferred)
             mesa_loge("Failed to load validation layer");
          goto fail;
       }
@@ -3361,11 +3308,13 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
 
    if (screen->instance_info->have_EXT_debug_utils &&
       (zink_debug & ZINK_DEBUG_VALIDATION) && !create_debug(screen)) {
+      if (!screen->driver_name_is_inferred)
          debug_printf("ZINK: failed to setup debug utils\n");
    }
 
    choose_pdev(screen, dev_major, dev_minor, adapter_luid);
    if (screen->pdev == VK_NULL_HANDLE) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("ZINK: failed to choose pdev");
       goto fail;
    }
@@ -3382,6 +3331,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
    screen->have_dynamic_state_vertex_input_binding_stride = true;
 
    if (!zink_get_physical_device_info(screen)) {
+      if (!screen->driver_name_is_inferred)
          debug_printf("ZINK: failed to detect features\n");
       goto fail;
    }
@@ -3430,21 +3380,26 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
       /* determine if vis vram is roughly equal to total vram */
       if (biggest_vis_vram > biggest_vram * 0.9)
          screen->resizable_bar = true;
+      if (biggest_vis_vram >= 8ULL * 1024ULL * 1024ULL * 1024ULL)
+         screen->always_cached_upload = true;
    }
 
    setup_renderdoc(screen);
    if (screen->threaded_submit && !util_queue_init(&screen->flush_queue, "zfq", 8, 1, UTIL_QUEUE_INIT_RESIZE_IF_FULL, screen)) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("zink: Failed to create flush queue.\n");
       goto fail;
    }
 
    zink_internal_setup_moltenvk(screen);
    if (!screen->info.have_KHR_timeline_semaphore && !screen->info.feats12.timelineSemaphore) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("zink: KHR_timeline_semaphore is required");
       goto fail;
    }
 
    if (zink_driverid(screen) == VK_DRIVER_ID_IMAGINATION_PROPRIETARY && !screen->info.feats.features.geometryShader) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("zink: Imagination proprietary driver w/o geometryShader is unsupported");
       goto fail;
    }
@@ -3518,10 +3473,8 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
    screen->base.is_parallel_shader_compilation_finished = zink_is_parallel_shader_compilation_finished;
    screen->base.get_vendor = zink_get_vendor;
    screen->base.get_device_vendor = zink_get_device_vendor;
-   screen->base.get_compute_param = zink_get_compute_param;
    screen->base.get_timestamp = zink_get_timestamp;
    screen->base.query_memory_info = zink_query_memory_info;
-   screen->base.get_shader_param = zink_get_shader_param;
    screen->base.get_compiler_options = zink_get_compiler_options;
    screen->base.get_sample_pixel_grid = zink_get_sample_pixel_grid;
    screen->base.is_compute_copy_faster = zink_is_compute_copy_faster;
@@ -3547,6 +3500,16 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
    screen->base.set_damage_region = zink_set_damage_region;
    screen->base.get_cl_cts_version = zink_cl_cts_version;
 
+   screen->total_video_mem = get_video_mem(screen);
+   screen->clamp_video_mem = screen->total_video_mem * 0.8;
+   if (!os_get_total_physical_memory(&screen->total_mem)) {
+      if (!screen->driver_name_is_inferred)
+         mesa_loge("ZINK: failed to get total physical memory");
+      goto fail;
+   }
+
+   zink_init_shader_caps(screen);
+   zink_init_compute_caps(screen);
    zink_init_screen_caps(screen);
 
    if (screen->info.have_EXT_sample_locations) {
@@ -3564,6 +3527,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
    if (!zink_screen_resource_init(&screen->base))
       goto fail;
    if (!zink_bo_init(screen)) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("ZINK: failed to initialize suballocator");
       goto fail;
    }
@@ -3573,6 +3537,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
       screen->driver_compiler_workarounds.io_opt = true;
    zink_screen_init_compiler(screen);
    if (!disk_cache_init(screen)) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("ZINK: failed to initialize disk cache");
       goto fail;
    }
@@ -3585,14 +3550,8 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
 
    screen->driconf.inline_uniforms = debug_get_bool_option("ZINK_INLINE_UNIFORMS", screen->is_cpu);
 
-   screen->total_video_mem = get_video_mem(screen);
-   screen->clamp_video_mem = screen->total_video_mem * 0.8;
-   if (!os_get_total_physical_memory(&screen->total_mem)) {
-         mesa_loge("ZINK: failed to get total physical memory");
-      goto fail;
-   }
-
    if (!zink_screen_init_semaphore(screen)) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("zink: failed to create timeline semaphore");
       goto fail;
    }
@@ -3601,6 +3560,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
    {
       if (!screen->info.have_EXT_descriptor_buffer) {
          if (zink_descriptor_mode == ZINK_DESCRIPTOR_MODE_DB) {
+            if (!screen->driver_name_is_inferred)
                mesa_loge("Cannot use db descriptor mode without EXT_descriptor_buffer");
             goto fail;
          }
@@ -3608,6 +3568,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
       }
       if (!screen->resizable_bar) {
          if (zink_descriptor_mode == ZINK_DESCRIPTOR_MODE_DB) {
+            if (!screen->driver_name_is_inferred)
                mesa_loge("Cannot use db descriptor mode without resizable bar");
             goto fail;
          }
@@ -3615,6 +3576,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
       }
       if (!screen->info.have_EXT_non_seamless_cube_map) {
          if (zink_descriptor_mode == ZINK_DESCRIPTOR_MODE_DB) {
+            if (!screen->driver_name_is_inferred)
                mesa_loge("Cannot use db descriptor mode without EXT_non_seamless_cube_map");
             goto fail;
          }
@@ -3622,6 +3584,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
       }
       if (!screen->info.rb2_feats.nullDescriptor) {
          if (zink_descriptor_mode == ZINK_DESCRIPTOR_MODE_DB) {
+            if (!screen->driver_name_is_inferred)
                mesa_loge("Cannot use db descriptor mode without robustness2.nullDescriptor");
             goto fail;
          }
@@ -3629,6 +3592,7 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
       }
       if (ZINK_FBFETCH_DESCRIPTOR_SIZE < screen->info.db_props.inputAttachmentDescriptorSize) {
          if (zink_descriptor_mode == ZINK_DESCRIPTOR_MODE_DB) {
+            if (!screen->driver_name_is_inferred)
                mesa_loge("Cannot use db descriptor mode with inputAttachmentDescriptorSize(%u) > %u", (unsigned)screen->info.db_props.inputAttachmentDescriptorSize, ZINK_FBFETCH_DESCRIPTOR_SIZE);
             goto fail;
          }
@@ -3693,11 +3657,13 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
    zink_init_screen_pipeline_libs(screen);
 
    if (!init_layouts(screen)) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("ZINK: failed to initialize layouts");
       goto fail;
    }
 
    if (!zink_descriptor_layouts_init(screen)) {
+      if (!screen->driver_name_is_inferred)
          mesa_loge("ZINK: failed to initialize descriptor layouts");
       goto fail;
    }
