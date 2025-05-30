@@ -296,7 +296,7 @@ option(
   description : 'List of vulkan layers to build'
 )
 
-option(
+option(Add commentMore actions
   'shared-glapi',
   type : 'feature',
   deprecated: true,
@@ -508,6 +508,13 @@ option(
   type : 'string',
   value : '',
   description : 'Location to install HTML documentation. Default: $datadir/doc/mesa.'
+)
+
+option(
+  'osmesa',
+  type : 'boolean',
+  value : false,
+  description : 'Build OSmesa.'
 )
 
 option(

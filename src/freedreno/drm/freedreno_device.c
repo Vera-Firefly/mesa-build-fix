@@ -24,23 +24,30 @@ struct fd_device *msm_device_new(int fd, drmVersionPtr version);
 struct fd_device *virtio_device_new(int fd, drmVersionPtr version);
 #endif
 
+#ifdef HAVE_FREEDRENO_KGSL
+struct fd_device *kgsl_device_new(int fd);
+#endif
+
 uint64_t os_page_size = 4096;
 
 struct fd_device *
 fd_device_new(int fd)
 {
    struct fd_device *dev = NULL;
-   drmVersionPtr version;
+   drmVersionPtr version = NULL;
    bool use_heap = false;
+   bool support_use_heap = true;
 
    os_get_page_size(&os_page_size);
 
+#ifdef HAVE_LIBDRM
    /* figure out if we are kgsl or msm drm driver: */
    version = drmGetVersion(fd);
    if (!version) {
       ERROR_MSG("cannot get version: %s", strerror(errno));
       return NULL;
    }
+#endif
 
 #ifdef HAVE_FREEDRENO_VIRTIO
    if (debug_get_bool_option("FD_FORCE_VTEST", false)) {
@@ -48,7 +55,7 @@ fd_device_new(int fd)
       dev = virtio_device_new(-1, version);
    } else
 #endif
-   if (!strcmp(version->name, "msm")) {
+   if (version && !strcmp(version->name, "msm")) {
       DEBUG_MSG("msm DRM device");
       if (version->version_major != 1) {
          ERROR_MSG("unsupported version: %u.%u.%u", version->version_major,
@@ -58,7 +65,7 @@ fd_device_new(int fd)
 
       dev = msm_device_new(fd, version);
 #ifdef HAVE_FREEDRENO_VIRTIO
-   } else if (!strcmp(version->name, "virtio_gpu")) {
+   } else if (version && !strcmp(version->name, "virtio_gpu")) {
       DEBUG_MSG("virtio_gpu DRM device");
       dev = virtio_device_new(fd, version);
       /* Only devices that support a hypervisor are a6xx+, so avoid the
@@ -70,6 +77,9 @@ fd_device_new(int fd)
    } else if (!strcmp(version->name, "kgsl")) {
       DEBUG_MSG("kgsl DRM device");
       dev = kgsl_device_new(fd);
+      support_use_heap = false;
+      if (dev)
+         goto out;
 #endif
    }
 
@@ -102,7 +112,7 @@ out:
    simple_mtx_init(&dev->submit_lock, mtx_plain);
    simple_mtx_init(&dev->suballoc_lock, mtx_plain);
 
-   if (!use_heap) {
+   if (support_use_heap && !use_heap) {
       struct fd_pipe *pipe = fd_pipe_new(dev, FD_PIPE_3D);
 
       if (!pipe)
@@ -234,6 +244,12 @@ bool
 fd_dbg(void)
 {
    return debug_get_option_libgl();
+}
+
+uint32_t
+fd_get_features(struct fd_device *dev)
+{
+    return dev->features;
 }
 
 bool
