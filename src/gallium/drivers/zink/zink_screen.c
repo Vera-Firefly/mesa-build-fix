@@ -157,7 +157,7 @@ static VkInstance instance;
 static const char *
 zink_get_vendor(struct pipe_screen *pscreen)
 {
-   return "Mesa";
+   return "OSMesa(Android)";
 }
 
 static const char *
