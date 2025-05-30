@@ -286,6 +286,14 @@ option(
 )
 
 option(
+  'shared-glapi',
+  type : 'feature',
+  deprecated: {'true': 'enabled', 'false': 'disabled'},
+  description : 'Whether to build a shared or static glapi. Defaults to ' +
+                'disabled on Windows, enabled elsewhere'
+)
+
+option(
   'vulkan-layers',
   type : 'array',
   value : [],
@@ -294,13 +302,6 @@ option(
     'vram-report-limit',
   ],
   description : 'List of vulkan layers to build'
-)
-
-option(
-  'shared-glapi',
-  type : 'feature',
-  deprecated: true,
-  description : 'Does nothing, left here for a while to avoid build breakages.',
 )
 
 option(
@@ -508,6 +509,13 @@ option(
   type : 'string',
   value : '',
   description : 'Location to install HTML documentation. Default: $datadir/doc/mesa.'
+)
+
+option(
+  'osmesa',
+  type : 'boolean',
+  value : false,
+  description : 'Build OSmesa.'
 )
 
 option(
