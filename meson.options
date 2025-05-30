@@ -296,7 +296,7 @@ option(
   description : 'List of vulkan layers to build'
 )
 
-option(Add commentMore actions
+option(
   'shared-glapi',
   type : 'feature',
   deprecated: true,
