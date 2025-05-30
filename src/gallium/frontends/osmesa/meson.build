@@ -3,9 +3,7 @@
 
 osmesa_st_c_args = []
 if with_platform_windows
-  if not with_shared_glapi
-    osmesa_st_c_args += ['-D_GLAPI_NO_EXPORTS']
-  endif
+  osmesa_st_c_args += ['-D_GLAPI_NO_EXPORTS']
 endif
 
 libosmesa_st = static_library(

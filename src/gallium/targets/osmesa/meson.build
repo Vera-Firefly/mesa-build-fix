@@ -5,9 +5,6 @@ osmesa_link_with = []
 osmesa_link_args = []
 osmesa_link_deps = []
 
-if with_shared_glapi
-  osmesa_link_with += libglapi
-endif
 if with_ld_version_script
   osmesa_link_args += [
     '-Wl,--version-script', join_paths(meson.current_source_dir(), 'osmesa.sym')
