@@ -56,7 +56,6 @@
 #  define LOG_TAG "MESA"
 #  include <unistd.h>
 #  include <log/log.h>
-#  include <cutils/properties.h>
 #elif DETECT_OS_LINUX || DETECT_OS_CYGWIN || DETECT_OS_SOLARIS || DETECT_OS_HURD || DETECT_OS_MANAGARM
 #  include <unistd.h>
 #elif DETECT_OS_OPENBSD || DETECT_OS_FREEBSD
@@ -64,10 +63,18 @@
 #  include <sys/sysctl.h>
 #elif DETECT_OS_APPLE || DETECT_OS_BSD
 #  include <sys/sysctl.h>
+#  if DETECT_OS_APPLE
+#    include <mach/mach_host.h>
+#    include <mach/vm_param.h>
+#    include <mach/vm_statistics.h>
+#   endif
 #elif DETECT_OS_HAIKU
 #  include <kernel/OS.h>
 #elif DETECT_OS_WINDOWS
 #  include <windows.h>
+#elif DETECT_OS_FUCHSIA
+#include <unistd.h>
+#include <zircon/syscalls.h>
 #else
 #error unexpected platform in os_sysinfo.c
 #endif
@@ -82,7 +89,7 @@ os_log_message(const char *message)
    static FILE *fout = NULL;
 
    if (!fout) {
-#ifdef DEBUG
+#if MESA_DEBUG
       /* one-time init */
       const char *filename = os_get_option("GALLIUM_LOG_FILE");
       if (filename) {
@@ -128,53 +135,6 @@ os_log_message(const char *message)
 #endif
 }
 
-#if DETECT_OS_ANDROID
-#  include <ctype.h>
-#  include "c11/threads.h"
-
-/**
- * Get an option value from android's property system, as a fallback to
- * getenv() (which is generally less useful on android due to processes
- * typically being forked from the zygote.
- *
- * The option name used for getenv is translated into a property name
- * by:
- *
- *  1) convert to lowercase
- *  2) replace '_' with '.'
- *  3) if necessary, prepend "mesa."
- *
- * For example:
- *  - MESA_EXTENSION_OVERRIDE -> mesa.extension.override
- *  - GALLIUM_HUD -> mesa.gallium.hud
- *
- */
-static char *
-os_get_android_option(const char *name)
-{
-   static thread_local char os_android_option_value[PROPERTY_VALUE_MAX];
-   char key[PROPERTY_KEY_MAX];
-   char *p = key, *end = key + PROPERTY_KEY_MAX;
-   /* add "mesa." prefix if necessary: */
-   if (strstr(name, "MESA_") != name)
-      p += strlcpy(p, "mesa.", end - p);
-   p += strlcpy(p, name, end - p);
-   for (int i = 0; key[i]; i++) {
-      if (key[i] == '_') {
-         key[i] = '.';
-      } else {
-         key[i] = tolower(key[i]);
-      }
-   }
-
-   int len = property_get(key, os_android_option_value, NULL);
-   if (len > 1) {
-      return os_android_option_value;
-   }
-   return NULL;
-}
-#endif
-
 #if DETECT_OS_WINDOWS
 
 /* getenv doesn't necessarily reflect changes to the environment
@@ -195,11 +155,6 @@ const char *
 os_get_option(const char *name)
 {
    const char *opt = getenv(name);
-#if DETECT_OS_ANDROID
-   if (!opt) {
-      opt = os_get_android_option(name);
-   }
-#endif
    return opt;
 }
 
@@ -311,6 +266,9 @@ os_get_total_physical_memory(uint64_t *size)
    ret = GlobalMemoryStatusEx(&status);
    *size = status.ullTotalPhys;
    return (ret == true);
+#elif DETECT_OS_FUCHSIA
+   *size = zx_system_get_physmem();
+   return true;
 #else
 #error unexpected platform in os_misc.c
    return false;
@@ -368,6 +326,16 @@ os_get_available_system_memory(uint64_t *size)
    ret = GlobalMemoryStatusEx(&status);
    *size = status.ullAvailPhys;
    return (ret == true);
+#elif DETECT_OS_APPLE
+   vm_statistics64_data_t vm_stats;
+   mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+   if (host_statistics64(mach_host_self(), HOST_VM_INFO,
+         (host_info64_t)&vm_stats, &count) != KERN_SUCCESS) {
+      return false;
+   }
+
+   *size = ((uint64_t)vm_stats.free_count + (uint64_t)vm_stats.inactive_count) * PAGE_SIZE;
+   return true;
 #else
    return false;
 #endif
@@ -381,7 +349,7 @@ os_get_available_system_memory(uint64_t *size)
 bool
 os_get_page_size(uint64_t *size)
 {
-#if DETECT_OS_UNIX && !DETECT_OS_APPLE && !DETECT_OS_HAIKU
+#if DETECT_OS_POSIX_LITE && !DETECT_OS_APPLE && !DETECT_OS_HAIKU
    const long page_size = sysconf(_SC_PAGE_SIZE);
 
    if (page_size <= 0)
@@ -399,12 +367,8 @@ os_get_page_size(uint64_t *size)
    *size = SysInfo.dwPageSize;
    return true;
 #elif DETECT_OS_APPLE
-   size_t len = sizeof(*size);
-   int mib[2];
-
-   mib[0] = CTL_HW;
-   mib[1] = HW_PAGESIZE;
-   return (sysctl(mib, 2, size, &len, NULL, 0) == 0);
+   *size = PAGE_SIZE;
+   return true;
 #else
 #error unexpected platform in os_sysinfo.c
    return false;

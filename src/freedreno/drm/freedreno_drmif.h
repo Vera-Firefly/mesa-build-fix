@@ -1,24 +1,6 @@
 /*
- * Copyright (C) 2012-2018 Rob Clark <robclark@freedesktop.org>
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice (including the next
- * paragraph) shall be included in all copies or substantial portions of the
- * Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Copyright © 2012-2018 Rob Clark <robclark@freedesktop.org>
+ * SPDX-License-Identifier: MIT
  *
  * Authors:
  *    Rob Clark <robclark@freedesktop.org>
@@ -65,6 +47,14 @@ enum fd_param_id {
    FD_SUSPEND_COUNT, /* # of times the GPU has suspended, and potentially lost state */
    FD_SYSPROF,       /* Settable (for CAP_SYS_ADMIN) param for system profiling */
    FD_VA_SIZE,       /* GPU virtual address size */
+   FD_UCHE_TRAP_BASE,
+};
+
+enum fd_reset_status {
+   FD_RESET_NO_ERROR,
+   FD_RESET_GUILTY,
+   FD_RESET_INNOCENT,
+   FD_RESET_UNKNOWN,
 };
 
 /**
@@ -147,6 +137,20 @@ int fd_fence_wait(struct fd_fence *f);
 /* internal bo flags: */
 #define _FD_BO_NOSYNC             BITSET_BIT(7) /* Avoid userspace fencing on control buffers */
 
+/* Additional flags hinting usage, only used for tracing.  Buffers without
+ * one of these flags set will be presumed to be driver internal.
+ */
+#define FD_BO_HINT_BUFFER         BITSET_BIT(8)
+#define FD_BO_HINT_IMAGE          BITSET_BIT(9)
+#define FD_BO_HINT_COMMAND        BITSET_BIT(10)
+#define _FD_BO_HINT_HEAP          BITSET_BIT(11)
+#define _FD_BO_HINTS              ( \
+   FD_BO_HINT_BUFFER | \
+   FD_BO_HINT_IMAGE | \
+   FD_BO_HINT_COMMAND | \
+   _FD_BO_HINT_HEAP | \
+   0)
+
 /*
  * bo access flags: (keep aligned to MSM_PREP_x)
  */
@@ -183,6 +187,13 @@ enum fd_version {
 };
 enum fd_version fd_device_version(struct fd_device *dev);
 
+enum fd_features {
+    FD_FEATURE_DIRECT_RESET = 1,
+    FD_FEATURE_IMPORT_DMABUF = 2,
+};
+
+uint32_t fd_get_features(struct fd_device *dev);
+
 bool fd_has_syncobj(struct fd_device *dev);
 
 /* pipe functions:
@@ -204,6 +215,7 @@ int fd_pipe_wait(struct fd_pipe *pipe, const struct fd_fence *fence);
 /* timeout in nanosec */
 int fd_pipe_wait_timeout(struct fd_pipe *pipe, const struct fd_fence *fence,
                          uint64_t timeout);
+int fd_pipe_get_reset_status(struct fd_pipe *pipe, enum fd_reset_status *status);
 
 /* buffer-object functions:
  */
@@ -285,6 +297,7 @@ struct fd_bo *fd_bo_from_handle(struct fd_device *dev, uint32_t handle,
                                 uint32_t size);
 struct fd_bo *fd_bo_from_name(struct fd_device *dev, uint32_t name);
 struct fd_bo *fd_bo_from_dmabuf(struct fd_device *dev, int fd);
+struct fd_bo *fd_bo_from_dmabuf_drm(struct fd_device *dev, int fd);
 void fd_bo_mark_for_dump(struct fd_bo *bo);
 
 static inline uint64_t
