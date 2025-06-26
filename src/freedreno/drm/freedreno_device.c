@@ -99,7 +99,7 @@ fd_device_new(int fd)
    }
    if (!version) {
       printf("[ FD Device ] Cannot get version: %s\n", strerror(errno));
-      return NULL;
+      if (!fd_ver) return NULL;
    }
 #endif
 
