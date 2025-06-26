@@ -36,7 +36,7 @@ uint64_t os_page_size = 4096;
 
 #ifdef HAVE_LIBDRM
 static drmVersionPtr
-fd_get_device_version(int fd, char* fd_ver)
+fd_get_device_version(int fd, const char* fd_ver)
 {
     drmVersionPtr ver = NULL;
     ver = drmGetVersion(fd);
