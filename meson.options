@@ -127,6 +127,7 @@ option(
 option(
   'gallium-xa',
   type : 'feature',
+  value : 'disabled',
   description : 'enable gallium xa frontend.',
   deprecated: true,
 )
@@ -508,13 +509,6 @@ option(
   type : 'string',
   value : '',
   description : 'Location to install HTML documentation. Default: $datadir/doc/mesa.'
-)
-
-option(
-  'osmesa',
-  type : 'boolean',
-  value : false,
-  description : 'Build OSmesa.'
 )
 
 option(

@@ -6,10 +6,6 @@
  *    Rob Clark <robclark@freedesktop.org>
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <xf86drm.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -28,80 +24,23 @@ struct fd_device *msm_device_new(int fd, drmVersionPtr version);
 struct fd_device *virtio_device_new(int fd, drmVersionPtr version);
 #endif
 
-#ifdef HAVE_FREEDRENO_KGSL
-struct fd_device *kgsl_device_new(int fd);
-#endif
-
 uint64_t os_page_size = 4096;
-
-#ifdef HAVE_LIBDRM
-static drmVersionPtr
-fd_get_device_version(int fd, const char* fd_ver)
-{
-    drmVersionPtr ver = NULL;
-    ver = drmGetVersion(fd);
-
-    if (!ver) {
-        printf("[ FD Device ] Cannot get version: %s, Trying to impersonate ...\n", strerror(errno));
-        if (fd_ver) goto fakeVersion;
-        printf("[ FD Device ] Failed...\n");
-        goto fail;
-    }
-
-    return ver;
-
-fakeVersion:
-    drmVersionPtr fake = calloc(1, sizeof(struct drm_version));
-
-    if (!strcmp(fd_ver, "msm")) {
-        fake->version_major = 1;
-        fake->version_minor = 0;
-        fake->version_patchlevel = 0;
-
-        fake->name = strdup("msm");
-        fake->name_len = strlen(fake->name);
-        fake->desc = strdup("Qualcomm MSM DRM driver");
-        fake->desc_len = strlen(fake->desc);
-        fake->date = strdup("20250625");
-        fake->date_len = strlen(fake->date);
-    } else {
-        goto fail;
-    }
-
-    return fake;
-
-fail:
-    return NULL;
-}
-#endif
 
 struct fd_device *
 fd_device_new(int fd)
 {
-   const char* fd_ver = getenv("MESA_LOADER_DRIVER_OVERRIDE");
    struct fd_device *dev = NULL;
-   drmVersionPtr version = NULL;
+   drmVersionPtr version;
    bool use_heap = false;
-   bool support_use_heap = true;
 
    os_get_page_size(&os_page_size);
 
-#ifdef HAVE_LIBDRM
    /* figure out if we are kgsl or msm drm driver: */
-   if (fd_ver == NULL) {
-      printf("[ FD Device ] Cannot get config, try get Version...\n");
-      version = drmGetVersion(fd);
-   } else if (!strcmp(fd_ver, "msm")) {
-      version = fd_get_device_version(fd, fd_ver);
-   } else if (!strcmp(fd_ver, "virtio_gpu")) {
-      printf("[ FD Device ] VirtioGPU is not supported ...\n");
+   version = drmGetVersion(fd);
+   if (!version) {
+      ERROR_MSG("cannot get version: %s", strerror(errno));
       return NULL;
    }
-   if (!version) {
-      printf("[ FD Device ] Cannot get version: %s\n", strerror(errno));
-      if (!fd_ver) return NULL;
-   }
-#endif
 
 #ifdef HAVE_FREEDRENO_VIRTIO
    if (debug_get_bool_option("FD_FORCE_VTEST", false)) {
@@ -109,8 +48,8 @@ fd_device_new(int fd)
       dev = virtio_device_new(-1, version);
    } else
 #endif
-   if (version && !strcmp(version->name, "msm")) {
-      printf("[ FD Device ] msm DRM device\n");
+   if (!strcmp(version->name, "msm")) {
+      DEBUG_MSG("msm DRM device");
       if (version->version_major != 1) {
          ERROR_MSG("unsupported version: %u.%u.%u", version->version_major,
                    version->version_minor, version->version_patchlevel);
@@ -119,7 +58,7 @@ fd_device_new(int fd)
 
       dev = msm_device_new(fd, version);
 #ifdef HAVE_FREEDRENO_VIRTIO
-   } else if (version && !strcmp(version->name, "virtio_gpu")) {
+   } else if (!strcmp(version->name, "virtio_gpu")) {
       DEBUG_MSG("virtio_gpu DRM device");
       dev = virtio_device_new(fd, version);
       /* Only devices that support a hypervisor are a6xx+, so avoid the
@@ -128,17 +67,14 @@ fd_device_new(int fd)
       use_heap = true;
 #endif
 #if HAVE_FREEDRENO_KGSL
-   } else {
-      printf("[ FD Device ] kgsl DRM device\n");
+   } else if (!strcmp(version->name, "kgsl")) {
+      DEBUG_MSG("kgsl DRM device");
       dev = kgsl_device_new(fd);
-      support_use_heap = false;
-      if (dev)
-         goto out;
 #endif
    }
 
    if (!dev) {
-      printf("unsupported device: %s\n", fd_ver);
+      INFO_MSG("unsupported device: %s", version->name);
       goto out;
    }
 
@@ -166,7 +102,7 @@ out:
    simple_mtx_init(&dev->submit_lock, mtx_plain);
    simple_mtx_init(&dev->suballoc_lock, mtx_plain);
 
-   if (support_use_heap && !use_heap) {
+   if (!use_heap) {
       struct fd_pipe *pipe = fd_pipe_new(dev, FD_PIPE_3D);
 
       if (!pipe)
@@ -298,12 +234,6 @@ bool
 fd_dbg(void)
 {
    return debug_get_option_libgl();
-}
-
-uint32_t
-fd_get_features(struct fd_device *dev)
-{
-    return dev->features;
 }
 
 bool
