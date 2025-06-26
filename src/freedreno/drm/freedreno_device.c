@@ -6,6 +6,10 @@
  *    Rob Clark <robclark@freedesktop.org>
  */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <xf86drm.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -30,9 +34,51 @@ struct fd_device *kgsl_device_new(int fd);
 
 uint64_t os_page_size = 4096;
 
+#ifdef HAVE_LIBDRM
+static drmVersionPtr
+fd_get_device_version(int fd, char* fd_ver)
+{
+    drmVersionPtr ver = NULL;
+    ver = drmGetVersion(fd);
+
+    if (!ver) {
+        printf("[ FD Device ] Cannot get version: %s, Trying to impersonate ...\n", strerror(errno));
+        if (fd_ver) goto fakeVersion;
+        printf("[ FD Device ] Failed...\n");
+        goto fail;
+    }
+
+    return ver;
+
+fakeVersion:
+    drmVersionPtr fake = calloc(1, sizeof(struct drm_version));
+
+    if (!strcmp(fd_ver, "msm")) {
+        fake->version_major = 1;
+        fake->version_minor = 0;
+        fake->version_patchlevel = 0;
+
+        fake->name = strdup("msm");
+        fake->name_len = strlen(fake->name);
+        fake->desc = strdup("Qualcomm MSM DRM driver");
+        fake->desc_len = strlen(fake->desc);
+        fake->date = strdup("20250625");
+        fake->date_len = strlen(fake->date);
+    } else {
+        goto fail;
+    }
+
+    return fake;
+
+fail:
+    return NULL;
+}
+#endif
+
 struct fd_device *
 fd_device_new(int fd)
 {
+   const char* fd_ver = getenv("MESA_LOADER_DRIVER_OVERRIDE");
    struct fd_device *dev = NULL;
    drmVersionPtr version = NULL;
    bool use_heap = false;
@@ -42,9 +88,17 @@ fd_device_new(int fd)
 
 #ifdef HAVE_LIBDRM
    /* figure out if we are kgsl or msm drm driver: */
-   version = drmGetVersion(fd);
+   if (fd_ver == NULL) {
+      printf("[ FD Device ] Cannot get config, try get Version...\n");
+      version = drmGetVersion(fd);
+   } else if (!strcmp(fd_ver, "msm")) {
+      version = fd_get_device_version(fd, fd_ver);
+   } else if (!strcmp(fd_ver, "virtio_gpu")) {
+      printf("[ FD Device ] VirtioGPU is not supported ...\n");
+      return NULL;
+   }
    if (!version) {
-      ERROR_MSG("cannot get version: %s", strerror(errno));
+      printf("[ FD Device ] Cannot get version: %s\n", strerror(errno));
       return NULL;
    }
 #endif
@@ -56,7 +110,7 @@ fd_device_new(int fd)
    } else
 #endif
    if (version && !strcmp(version->name, "msm")) {
-      DEBUG_MSG("msm DRM device");
+      printf("[ FD Device ] msm DRM device\n");
       if (version->version_major != 1) {
          ERROR_MSG("unsupported version: %u.%u.%u", version->version_major,
                    version->version_minor, version->version_patchlevel);
@@ -74,8 +128,8 @@ fd_device_new(int fd)
       use_heap = true;
 #endif
 #if HAVE_FREEDRENO_KGSL
-   } else if (!strcmp(version->name, "kgsl")) {
-      DEBUG_MSG("kgsl DRM device");
+   } else {
+      printf("[ FD Device ] kgsl DRM device\n");
       dev = kgsl_device_new(fd);
       support_use_heap = false;
       if (dev)
@@ -84,7 +138,7 @@ fd_device_new(int fd)
    }
 
    if (!dev) {
-      INFO_MSG("unsupported device: %s", version->name);
+      printf("unsupported device: %s\n", fd_ver);
       goto out;
    }
 

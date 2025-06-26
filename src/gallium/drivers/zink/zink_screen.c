@@ -157,7 +157,7 @@ static VkInstance instance;
 static const char *
 zink_get_vendor(struct pipe_screen *pscreen)
 {
-   return "OSMesa(Android)";
+   return "Mesa";
 }
 
 static const char *
@@ -308,9 +308,9 @@ disk_cache_init(struct zink_screen *screen)
        build_id_find_nhdr_for_addr(disk_cache_init);
    if (note != NULL)
    {
-       unsigned build_id_len = build_id_length(note);
-       assert(note && build_id_len == 20); /* blake3 */
-       _mesa_blake3_update(&ctx, build_id_data(note), build_id_len);
+      unsigned build_id_len = build_id_length(note);
+      assert(note && build_id_len == 20); /* blake3 */
+      _mesa_blake3_update(&ctx, build_id_data(note), build_id_len);
    }
 #endif
 
@@ -1679,7 +1679,7 @@ choose_pdev(struct zink_screen *screen, int64_t dev_major, int64_t dev_minor, ui
    VKSCR(GetPhysicalDeviceProperties)(screen->pdev, &screen->info.props);
 
    /* allow software rendering only if forced by the user */
-   if (!cpu && screen->info.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
+   if ((!cpu && screen->info.props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)) {
       screen->pdev = VK_NULL_HANDLE;
       return;
    }
@@ -2222,7 +2222,12 @@ setup_renderdoc(struct zink_screen *screen)
    const char *capture_id = debug_get_option("ZINK_RENDERDOC", NULL);
    if (!capture_id)
       return;
-   void *renderdoc = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
+#if DETECT_OS_ANDROID
+   const char *libstr = "libVkLayer_GLES_RenderDoc.so";
+#else
+   const char *libstr = "librenderdoc.so";
+#endif
+   void *renderdoc = dlopen(libstr, RTLD_NOW | RTLD_NOLOAD);
    /* not loaded */
    if (!renderdoc)
       return;
@@ -3275,10 +3280,13 @@ zink_internal_create_screen(const struct pipe_screen_config *config, int64_t dev
    if (++instance_refcount == 1) {
       instance_info.loader_version = zink_get_loader_version(screen);
       instance = zink_create_instance(screen, &instance_info);
-      if (!instance)
-         goto fail;
-   } else {
-      assert(instance);
+   }
+   if (!instance) {
+      /* We don't decrement instance_refcount here. This prevents us from trying
+       * to create another instance on subsequent calls.
+       */
+      simple_mtx_unlock(&instance_lock);
+      goto fail;
    }
    screen->instance = instance;
    screen->instance_info = &instance_info;
